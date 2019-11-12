@@ -44,9 +44,10 @@ struct sg_table {
 /*
  * Notes on SG table design.
  *
- * We use the unsigned long page_link field in the scatterlist struct to place
- * the page pointer AND encode information about the sg table as well. The two
- * lower bits are reserved for this information.
+ * Architectures must provide an unsigned long page_link field in the
+ * scatterlist struct. We use that to place the page pointer AND encode
+ * information about the sg table as well. The two lower bits are reserved
+ * for this information.
  *
  * If bit 0 is set, then the page_link contains a pointer to the next sg
  * table list. Otherwise the next entry is at sg + 1.
@@ -161,6 +162,10 @@ static inline void sg_set_buf(struct scatterlist *sg, const void *buf,
 static inline void sg_chain(struct scatterlist *prv, unsigned int prv_nents,
 			    struct scatterlist *sgl)
 {
+#ifndef CONFIG_ARCH_HAS_SG_CHAIN
+	BUG();
+#endif
+
 	/*
 	 * offset and length are unused for chain entry.  Clear them.
 	 */

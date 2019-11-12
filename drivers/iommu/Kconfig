@@ -137,6 +137,16 @@ config AMD_IOMMU_V2
 config DMAR_TABLE
 	bool
 
+config MTK_IOMMU
+	def_bool n
+	prompt "support for MTK IOMMU using DMA Remapping Devices"
+	select IOMMU_API
+	select ARM_DMA_USE_IOMMU
+	select MTK_SMI
+	help
+	  MTK iommu driver, support iommu masters access virtual memory address
+	  which will be translated by iommu HW.
+
 config INTEL_IOMMU
 	bool "Support for Intel IOMMU using DMA Remapping Devices"
 	depends on PCI_MSI && ACPI && (X86 || IA64_GENERIC)
@@ -326,40 +336,5 @@ config S390_IOMMU
 	select IOMMU_API
 	help
 	  Support for the IOMMU API for s390 PCI devices.
-
-config MTK_IOMMU
-	bool "MTK IOMMU Support"
-	depends on ARM || ARM64
-	depends on ARCH_MEDIATEK || COMPILE_TEST
-	select ARM_DMA_USE_IOMMU
-	select IOMMU_API
-	select IOMMU_DMA
-	select IOMMU_IO_PGTABLE_ARMV7S
-	select MEMORY
-	select MTK_SMI
-	help
-	  Support for the M4U on certain Mediatek SOCs. M4U is MultiMedia
-	  Memory Management Unit. This option enables remapping of DMA memory
-	  accesses for the multimedia subsystem.
-
-	  If unsure, say N here.
-
-config MTK_IOMMU_V1
-	bool "MTK IOMMU Version 1 (M4U gen1) Support"
-	depends on ARM
-	depends on ARCH_MEDIATEK || COMPILE_TEST
-	select ARM_DMA_USE_IOMMU
-	select IOMMU_API
-	select MEMORY
-	select MTK_SMI
-	select COMMON_CLK_MT2701_MMSYS
-	select COMMON_CLK_MT2701_IMGSYS
-	select COMMON_CLK_MT2701_VDECSYS
-	help
-	  Support for the M4U on certain Mediatek SoCs. M4U generation 1 HW is
-	  Multimedia Memory Managememt Unit. This option enables remapping of
-	  DMA memory accesses for the multimedia subsystem.
-
-	  if unsure, say N here.
 
 endif # IOMMU_SUPPORT

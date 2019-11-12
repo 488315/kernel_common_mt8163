@@ -70,7 +70,7 @@ SCHED_FEAT(RT_PUSH_IPI, true)
 #endif
 
 SCHED_FEAT(FORCE_SD_OVERLAP, false)
-SCHED_FEAT(RT_RUNTIME_SHARE, true)
+SCHED_FEAT(RT_RUNTIME_SHARE, false)
 SCHED_FEAT(LB_MIN, false)
 SCHED_FEAT(ATTACH_AGE_LOAD, true)
 
@@ -91,6 +91,11 @@ SCHED_FEAT(ENERGY_AWARE, false)
  * restrictions.
  */
 SCHED_FEAT(MIN_CAPACITY_CAPPING, false)
+#ifdef CONFIG_SCHED_HMP
+SCHED_FEAT(SCHED_HMP, true)
+#else
+SCHED_FEAT(SCHED_HMP, false)
+#endif
 
 /*
  * Enforce the priority of candidates selected by find_best_target()

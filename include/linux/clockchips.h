@@ -39,6 +39,15 @@ enum clock_event_state {
 	CLOCK_EVT_STATE_ONESHOT_STOPPED,
 };
 
+/* Clock event mode commands */
+enum clock_event_mode {
+	CLOCK_EVT_MODE_UNUSED = 0,
+	CLOCK_EVT_MODE_SHUTDOWN,
+	CLOCK_EVT_MODE_PERIODIC,
+	CLOCK_EVT_MODE_ONESHOT,
+	CLOCK_EVT_MODE_RESUME,
+};
+
 /*
  * Clock event features
  */
@@ -116,6 +125,8 @@ struct clock_event_device {
 	int			(*tick_resume)(struct clock_event_device *);
 
 	void			(*broadcast)(const struct cpumask *mask);
+	void			(*set_mode)(enum clock_event_mode mode,
+					    struct clock_event_device *);
 	void			(*suspend)(struct clock_event_device *);
 	void			(*resume)(struct clock_event_device *);
 	unsigned long		min_delta_ticks;
@@ -188,6 +199,15 @@ extern void clockevents_config_and_register(struct clock_event_device *dev,
 					    unsigned long max_delta);
 
 extern int clockevents_update_freq(struct clock_event_device *ce, u32 freq);
+
+extern void clockevents_exchange_device(struct clock_event_device *old,
+					struct clock_event_device *new);
+extern void clockevents_set_mode(struct clock_event_device *dev,
+				 enum clock_event_mode mode);
+extern int clockevents_program_event(struct clock_event_device *dev,
+				     ktime_t expires, bool force);
+
+extern void clockevents_handle_noop(struct clock_event_device *dev);
 
 static inline void
 clockevents_calc_mult_shift(struct clock_event_device *ce, u32 freq, u32 maxsec)

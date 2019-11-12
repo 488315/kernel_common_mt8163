@@ -1741,6 +1741,10 @@ struct io_latency_state {
 	u_int64_t	latency_y_axis[ARRAY_SIZE(latency_x_axis_us) + 1];
 	u_int64_t	latency_elems;
 	u_int64_t	latency_sum;
+	u_int64_t	latency_y_axis_read[ARRAY_SIZE(latency_x_axis_us) + 1];
+	u_int64_t	latency_reads_elems;
+	u_int64_t	latency_y_axis_write[ARRAY_SIZE(latency_x_axis_us) + 1];
+	u_int64_t	latency_writes_elems;
 };
 
 static inline void
@@ -1756,8 +1760,8 @@ blk_update_latency_hist(struct io_latency_state *s, u_int64_t delta_us)
 	s->latency_sum += delta_us;
 }
 
-ssize_t blk_latency_hist_show(char* name, struct io_latency_state *s,
-		char *buf, int buf_size);
+ssize_t blk_latency_hist_show(char* name, struct io_latency_state *s, char *buf, int buf_size);
+void blk_zero_latency_hist(struct io_latency_state *s);
 
 #else /* CONFIG_BLOCK */
 

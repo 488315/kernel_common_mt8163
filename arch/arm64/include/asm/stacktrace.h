@@ -22,6 +22,7 @@ struct stackframe {
 	unsigned long fp;
 	unsigned long sp;
 	unsigned long pc;
+	unsigned long lr;
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	int graph;
 #endif

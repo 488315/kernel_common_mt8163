@@ -50,11 +50,18 @@
 #include <linux/timer.h>
 #include <linux/freezer.h>
 
+#include <asm/cacheflush.h>
 #include <asm/uaccess.h>
 
 #include <trace/events/timer.h>
 
 #include "tick-internal.h"
+
+#ifdef CONFIG_MTK_SCHED_MONITOR
+#include "mtk_sched_mon.h"
+#endif
+
+#include <mt-plat/fpsgo_common.h>
 
 /*
  * The timer bases:
@@ -1252,7 +1259,13 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 */
 	raw_spin_unlock(&cpu_base->lock);
 	trace_hrtimer_expire_entry(timer, now);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+	mt_trace_hrt_start(fn);
+#endif
 	restart = fn(timer);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+	mt_trace_hrt_end(fn);
+#endif
 	trace_hrtimer_expire_exit(timer);
 	raw_spin_lock(&cpu_base->lock);
 

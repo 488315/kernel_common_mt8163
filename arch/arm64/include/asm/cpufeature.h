@@ -9,6 +9,8 @@
 #ifndef __ASM_CPUFEATURE_H
 #define __ASM_CPUFEATURE_H
 
+#include <linux/jump_label.h>
+
 #include <asm/cpucaps.h>
 #include <asm/hwcap.h>
 #include <asm/sysreg.h>
@@ -136,6 +138,7 @@ static inline void cpus_set_cap(unsigned int num)
 			num, ARM64_NCAPS);
 	} else {
 		__set_bit(num, cpu_hwcaps);
+		static_branch_enable(&cpu_hwcap_keys[num]);
 	}
 }
 

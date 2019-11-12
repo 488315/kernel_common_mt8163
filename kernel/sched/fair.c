@@ -32,11 +32,14 @@
 #include <linux/task_work.h>
 #include <linux/module.h>
 
+#include <mt-plat/aee.h>
+
 #include <trace/events/sched.h>
 
 #include "sched.h"
 #include "tune.h"
 #include "walt.h"
+
 
 /*
  * Targeted preemption latency for CPU-bound tasks:
@@ -111,6 +114,20 @@ const_debug unsigned int sysctl_sched_migration_cost = 500000UL;
  * (default: 10msec)
  */
 unsigned int __read_mostly sysctl_sched_shares_window = 10000000UL;
+
+unsigned long __weak arch_scale_freq_capacity(struct sched_domain *sd, int cpu)
+{
+	return SCHED_CAPACITY_SCALE;
+}
+
+unsigned long __weak arch_scale_cpu_capacity(struct sched_domain *sd, int cpu)
+{
+	if (sd && (sd->flags & SD_SHARE_CPUCAPACITY) && (sd->span_weight > 1))
+		return sd->smt_gain / sd->span_weight;
+
+	return SCHED_CAPACITY_SCALE;
+}
+
 
 #ifdef CONFIG_CFS_BANDWIDTH
 /*
@@ -274,7 +291,7 @@ static inline struct rq *rq_of(struct cfs_rq *cfs_rq)
 
 static inline struct task_struct *task_of(struct sched_entity *se)
 {
-	SCHED_WARN_ON(!entity_is_task(se));
+	/*SCHED_WARN_ON(!entity_is_task(se));*/
 	return container_of(se, struct task_struct, se);
 }
 
@@ -751,6 +768,8 @@ void init_entity_runnable_average(struct sched_entity *se)
 	if (entity_is_task(se))
 		sa->load_avg = scale_load_down(se->load.weight);
 	sa->load_sum = sa->load_avg * LOAD_AVG_MAX;
+	sa->loadwop_avg = scale_load_down(NICE_0_LOAD);
+	sa->loadwop_sum = sa->loadwop_avg * LOAD_AVG_MAX;
 
 	/*
 	 * At this point, util_avg won't be used in select_task_rq_fair anyway
@@ -758,6 +777,10 @@ void init_entity_runnable_average(struct sched_entity *se)
 	sa->util_avg = 0;
 	sa->util_sum = 0;
 	/* when this task enqueue'ed, it will contribute to its cfs_rq's load_avg */
+
+	/* sched: add trace_sched */
+	if (entity_is_task(se))
+		trace_sched_task_entity_avg(0, task_of(se), &se->avg);
 }
 
 static inline u64 cfs_rq_clock_task(struct cfs_rq *cfs_rq);
@@ -2745,6 +2768,31 @@ static inline void update_cfs_shares(struct sched_entity *se)
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
 #ifdef CONFIG_SMP
+
+/*
+ * generic entry point for cpu mask construction, dedicated for
+ * mediatek scheduler.
+ */
+static __init inline void cmp_cputopo_domain_setup(void)
+{
+	WARN(smp_processor_id() != 0, "%s is supposed runs on CPU0 while kernel init", __func__);
+#ifdef CONFIG_MTK_CPU_TOPOLOGY
+	/*
+	 * sched_init
+	 *   |-> cmp_cputopo_domain_seutp()
+	 * ...
+	 * rest_init
+	 *   ^ fork kernel_init
+	 *       |-> kernel_init_freeable
+	 *        ...
+	 *           |-> arch_build_cpu_topology_domain
+	 *
+	 * here, we focus to build up cpu topology and domain before scheduler runs.
+	 */
+	pr_debug("[CPUTOPO][%s] build CPU topology and cluster.\n", __func__);
+	arch_build_cpu_topology_domain();
+#endif
+}
 /* Precomputed fixed inverse multiplies for multiplication by y^n */
 static const u32 runnable_avg_yN_inv[] = {
 	0xffffffff, 0xfa83b2da, 0xf5257d14, 0xefe4b99a, 0xeac0c6e6, 0xe5b906e6,
@@ -2913,6 +2961,7 @@ __update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 				cfs_rq->runnable_load_sum +=
 						weight * scaled_delta_w;
 			}
+			sa->loadwop_sum += NICE_0_LOAD * scaled_delta_w;
 		}
 		if (running)
 			sa->util_sum += scaled_delta_w * scale_cpu;
@@ -2924,6 +2973,7 @@ __update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 		delta %= 1024;
 
 		sa->load_sum = decay_load(sa->load_sum, periods + 1);
+		sa->loadwop_sum = decay_load(sa->loadwop_sum, periods + 1);
 		if (cfs_rq) {
 			cfs_rq->runnable_load_sum =
 				decay_load(cfs_rq->runnable_load_sum, periods + 1);
@@ -2937,6 +2987,7 @@ __update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 			sa->load_sum += weight * contrib;
 			if (cfs_rq)
 				cfs_rq->runnable_load_sum += weight * contrib;
+			sa->loadwop_sum += NICE_0_LOAD * contrib;
 		}
 		if (running)
 			sa->util_sum += contrib * scale_cpu;
@@ -2948,6 +2999,7 @@ __update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 		sa->load_sum += weight * scaled_delta;
 		if (cfs_rq)
 			cfs_rq->runnable_load_sum += weight * scaled_delta;
+		sa->loadwop_sum += NICE_0_LOAD * scaled_delta;
 	}
 	if (running)
 		sa->util_sum += scaled_delta * scale_cpu;
@@ -2956,6 +3008,7 @@ __update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 
 	if (decayed) {
 		sa->load_avg = div_u64(sa->load_sum, LOAD_AVG_MAX);
+		sa->loadwop_avg = div_u64(sa->loadwop_sum, LOAD_AVG_MAX);
 		if (cfs_rq) {
 			cfs_rq->runnable_load_avg =
 				div_u64(cfs_rq->runnable_load_sum, LOAD_AVG_MAX);
@@ -3299,7 +3352,12 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq, bool update_freq)
 		removed_load = 1;
 		set_tg_cfs_propagate(cfs_rq);
 	}
+	if (atomic_long_read(&cfs_rq->removed_loadwop_avg)) {
+		s64 r = atomic_long_xchg(&cfs_rq->removed_loadwop_avg, 0);
 
+		sa->loadwop_avg = max_t(long, sa->loadwop_avg - r, 0);
+		sa->loadwop_sum = max_t(s64, sa->loadwop_sum - r * LOAD_AVG_MAX, 0);
+	}
 	if (atomic_long_read(&cfs_rq->removed_util_avg)) {
 		long r = atomic_long_xchg(&cfs_rq->removed_util_avg, 0);
 		sub_positive(&sa->util_avg, r);
@@ -3338,6 +3396,7 @@ static inline void update_load_avg(struct sched_entity *se, int flags)
 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
 	u64 now = cfs_rq_clock_task(cfs_rq);
 	struct rq *rq = rq_of(cfs_rq);
+	long old_loadwop_avg = se->avg.loadwop_avg, loadwop_avg_delta;	
 	int cpu = cpu_of(rq);
 	int decayed;
 	void *ptr = NULL;
@@ -3350,6 +3409,16 @@ static inline void update_load_avg(struct sched_entity *se, int flags)
 		__update_load_avg(now, cpu, &se->avg,
 			  se->on_rq * scale_load_down(se->load.weight),
 			  cfs_rq->curr == se, NULL);
+	if (se->on_rq) {
+		loadwop_avg_delta = se->avg.loadwop_avg - old_loadwop_avg;
+		cfs_rq->avg.loadwop_avg += loadwop_avg_delta;
+	}
+
+#ifdef CONFIG_MTK_SCHED_RQAVG_US
+		if (entity_is_task(se) && se->on_rq)
+			inc_nr_heavy_running(1, task_of(se), 1, false);
+#endif
+
 	}
 
 	decayed  = update_cfs_rq_load_avg(now, cfs_rq, true);
@@ -3362,6 +3431,7 @@ static inline void update_load_avg(struct sched_entity *se, int flags)
 #ifdef CONFIG_SCHED_WALT
 		ptr = (void *)&(task_of(se)->ravg);
 #endif
+		trace_sched_task_entity_avg(1, task_of(se), &se->avg);
 		trace_sched_load_avg_task(task_of(se), &se->avg, ptr);
 	}
 }
@@ -3379,6 +3449,8 @@ static void attach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 	se->avg.last_update_time = cfs_rq->avg.last_update_time;
 	cfs_rq->avg.load_avg += se->avg.load_avg;
 	cfs_rq->avg.load_sum += se->avg.load_sum;
+	cfs_rq->avg.loadwop_avg += se->avg.loadwop_avg;
+	cfs_rq->avg.loadwop_sum += se->avg.loadwop_sum;
 	cfs_rq->avg.util_avg += se->avg.util_avg;
 	cfs_rq->avg.util_sum += se->avg.util_sum;
 	set_tg_cfs_propagate(cfs_rq);
@@ -3399,6 +3471,8 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 
 	sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);
 	sub_positive(&cfs_rq->avg.load_sum, se->avg.load_sum);
+	sub_positive(&cfs_rq->avg.loadwop_avg, se->avg.loadwop_avg);
+	sub_positive(&cfs_rq->avg.loadwop_sum, se->avg.loadwop_sum);
 	sub_positive(&cfs_rq->avg.util_avg, se->avg.util_avg);
 	sub_positive(&cfs_rq->avg.util_sum, se->avg.util_sum);
 	set_tg_cfs_propagate(cfs_rq);
@@ -3485,6 +3559,7 @@ void remove_entity_load_avg(struct sched_entity *se)
 
 	sync_entity_load_avg(se);
 	atomic_long_add(se->avg.load_avg, &cfs_rq->removed_load_avg);
+	atomic_long_add(se->avg.loadwop_avg, &cfs_rq->removed_loadwop_avg);
 	atomic_long_add(se->avg.util_avg, &cfs_rq->removed_util_avg);
 }
 
@@ -4909,8 +4984,16 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(se);
 	}
 
-	if (!se)
+	if (!se) {
 		add_nr_running(rq, 1);
+#ifndef CONFIG_CFS_BANDWIDTH
+		if (rq->cfs.nr_running > rq->cfs.h_nr_running)
+			BUG_ON(rq->cfs.nr_running > rq->cfs.h_nr_running);
+#endif
+#ifdef CONFIG_MTK_SCHED_RQAVG_US
+		inc_nr_heavy_running(2, p, 1, false);
+#endif
+	}
 
 #ifdef CONFIG_SMP
 
@@ -5001,9 +5084,16 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(se);
 	}
 
-	if (!se)
+	if (!se) {
 		sub_nr_running(rq, 1);
-
+#ifndef CONFIG_CFS_BANDWIDTH
+		if (rq->cfs.nr_running > rq->cfs.h_nr_running)
+			BUG_ON(rq->cfs.nr_running > rq->cfs.h_nr_running);
+#endif
+#ifdef CONFIG_MTK_SCHED_RQAVG_US
+		inc_nr_heavy_running(3, p, -1, false);
+#endif
+	}
 #ifdef CONFIG_SMP
 
 	/*
@@ -6240,10 +6330,37 @@ boosted_task_util(struct task_struct *p)
 	return util + margin;
 }
 
+
+unsigned long
+get_boosted_task_util(struct task_struct *task)
+{
+	return boosted_task_util(task);
+}
+
+void get_task_util(struct task_struct *p, unsigned long *util,
+	unsigned long *boost_util)
+{
+	/* heavytask: using pelt */
+	*util = p->se.avg.util_avg;
+	*boost_util = boosted_task_util(p);
+}
+
+
 static unsigned long capacity_spare_wake(int cpu, struct task_struct *p)
 {
 	return max_t(long, capacity_of(cpu) - cpu_util_wake(cpu, p), 0);
 }
+
+#ifdef CONFIG_MTK_SCHED_INTEROP
+#define MT_RT_LOAD (2*1023*NICE_0_LOAD)
+static inline unsigned long mt_rt_load(int cpu)
+{
+	if (likely(!is_rt_throttle(cpu)))
+		return cpu_rq(cpu)->rt.rt_nr_running * MT_RT_LOAD;
+
+	return 0;
+}
+#endif
 
 /*
  * find_idlest_group finds and returns the least busy CPU group within the
@@ -6298,6 +6415,9 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 			else
 				load = target_load(i, load_idx);
 
+#ifdef CONFIG_MTK_SCHED_INTEROP
+			load += mt_rt_load(i);
+#endif
 			runnable_load += load;
 
 			avg_load += cfs_rq_load_avg(&cpu_rq(i)->cfs);
@@ -6415,6 +6535,9 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 			}
 		} else if (shallowest_idle_cpu == -1) {
 			load = weighted_cpuload(i);
+#ifdef CONFIG_MTK_SCHED_INTEROP
+			load += mt_rt_load(i);
+#endif
 			if (load < min_load || (load == min_load && i == this_cpu)) {
 				min_load = load;
 				least_loaded_cpu = i;
@@ -7231,6 +7354,34 @@ unlock:
 	return target_cpu;
 }
 
+#ifdef CONFIG_MTK_SCHED_TRACERS
+#define SELECT_TASK_RQ_FAIR __select_task_rq_fair
+static int
+SELECT_TASK_RQ_FAIR(struct task_struct *p, int prev_cpu,
+		int sd_flag, int wake_flags);
+static inline int
+select_task_rq_fair(struct task_struct *p,
+		int prev_cpu, int sd_flag, int wake_flags)
+{
+	int result = 0;
+	int cpu;
+	bool prefer_idle = 0;
+
+#ifdef CONFIG_CGROUP_SCHEDTUNE
+	prefer_idle = (schedtune_prefer_idle(p) > 0);
+#endif
+	result = SELECT_TASK_RQ_FAIR(p, prev_cpu, sd_flag, wake_flags);
+	cpu = (result & LB_CPU_MASK);
+
+	trace_sched_select_task_rq(p, result, prev_cpu, cpu,
+			task_util(p), boosted_task_util(p), prefer_idle);
+	return cpu;
+
+}
+#else
+#define SELECT_TASK_RQ_FAIR select_task_rq_fair
+#endif
+
 /*
  * select_task_rq_fair: Select target runqueue for the waking task in domains
  * that have the 'sd_flag' flag set. In practice, this is SD_BALANCE_WAKE,
@@ -7536,6 +7687,10 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 
 again:
 #ifdef CONFIG_FAIR_GROUP_SCHED
+	/* in case nr_running!=0 but h_nr_running==0 */
+	if (!cfs_rq->h_nr_running)
+		goto idle;
+
 	if (!cfs_rq->nr_running)
 		goto idle;
 
@@ -8281,8 +8436,11 @@ static void update_cfs_rq_h_load(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
 	struct sched_entity *se = cfs_rq->tg->se[cpu_of(rq)];
-	unsigned long now = jiffies;
+	u64 now = sched_clock_cpu(cpu_of(rq));
 	unsigned long load;
+
+	/* sched: change to jiffies */
+	now = now * HZ >> 30;
 
 	if (cfs_rq->last_h_load_update == now)
 		return;
@@ -10717,6 +10875,7 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 	cfs_rq->propagate_avg = 0;
 #endif
 	atomic_long_set(&cfs_rq->removed_load_avg, 0);
+	atomic_long_set(&cfs_rq->removed_loadwop_avg, 0);
 	atomic_long_set(&cfs_rq->removed_util_avg, 0);
 #endif
 }
@@ -11044,5 +11203,5 @@ __init void init_sched_fair_class(void)
 	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
 #endif
 #endif /* SMP */
-
+	cmp_cputopo_domain_setup();
 }

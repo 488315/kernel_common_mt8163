@@ -235,7 +235,7 @@ static void dw8250_set_termios(struct uart_port *p, struct ktermios *termios,
 	unsigned int rate;
 	int ret;
 
-	if (IS_ERR(d->clk))
+	if (IS_ERR(d->clk) || !old)
 		goto out;
 
 	clk_disable_unprepare(d->clk);
@@ -269,7 +269,7 @@ static bool dw8250_fallback_dma_filter(struct dma_chan *chan, void *param)
 
 static bool dw8250_idma_filter(struct dma_chan *chan, void *param)
 {
-	return param == chan->device->dev;
+	return param == chan->device->dev->parent;
 }
 
 static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
@@ -311,7 +311,7 @@ static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
 		p->set_termios = dw8250_set_termios;
 	}
 
-	/* Platforms with iDMA 64-bit */
+	/* Platforms with iDMA */
 	if (platform_get_resource_byname(to_platform_device(p->dev),
 					 IORESOURCE_MEM, "lpss_priv")) {
 		p->set_termios = dw8250_set_termios;
@@ -464,8 +464,7 @@ static int dw8250_probe(struct platform_device *pdev)
 	/* If no clock rate is defined, fail. */
 	if (!p->uartclk) {
 		dev_err(dev, "clock rate not defined\n");
-		err = -EINVAL;
-		goto err_clk;
+		return -EINVAL;
 	}
 
 	data->pclk = devm_clk_get(dev, "apb_pclk");
@@ -626,7 +625,6 @@ static const struct acpi_device_id dw8250_acpi_match[] = {
 	{ "APMC0D08", 0},
 	{ "AMD0020", 0 },
 	{ "AMDI0020", 0 },
-	{ "BRCM2032", 0 },
 	{ "HISI0031", 0 },
 	{ },
 };

@@ -760,7 +760,6 @@ config SPI_TLE62X0
 #
 
 endif # SPI_MASTER
-
 # (slave support would go here)
 
 endif # SPI

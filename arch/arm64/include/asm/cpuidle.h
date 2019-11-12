@@ -8,6 +8,7 @@ extern int arm_cpuidle_init(unsigned int cpu);
 extern int arm_cpuidle_suspend(int index);
 #else
 static inline int arm_cpuidle_init(unsigned int cpu)
+
 {
 	return -EOPNOTSUPP;
 }

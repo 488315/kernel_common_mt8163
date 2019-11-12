@@ -11,6 +11,12 @@
 #include "sched.h"
 #include "tune.h"
 
+#define MET_STUNE_DEBUG 1
+
+#if MET_STUNE_DEBUG
+#include <mt-plat/met_drv.h>
+#endif
+
 #ifdef CONFIG_CGROUP_SCHEDTUNE
 bool schedtune_initialized = false;
 #endif

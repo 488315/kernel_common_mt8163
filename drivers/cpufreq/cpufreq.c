@@ -123,7 +123,11 @@ EXPORT_SYMBOL_GPL(have_governor_per_policy);
 
 bool cpufreq_driver_is_slow(void)
 {
+#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
+	return false;
+#else
 	return !(cpufreq_driver->flags & CPUFREQ_DRIVER_FAST);
+#endif
 }
 EXPORT_SYMBOL_GPL(cpufreq_driver_is_slow);
 
@@ -135,6 +139,17 @@ struct kobject *get_governor_parent_kobj(struct cpufreq_policy *policy)
 		return cpufreq_global_kobject;
 }
 EXPORT_SYMBOL_GPL(get_governor_parent_kobj);
+
+#ifdef CONFIG_AMAZON_THERMAL
+struct cpufreq_frequency_table *cpufreq_frequency_get_table(unsigned int cpu)
+{
+	struct cpufreq_policy *policy = per_cpu(cpufreq_cpu_data, cpu);
+
+	return policy && !policy_is_inactive(policy) ?
+		policy->freq_table : NULL;
+}
+EXPORT_SYMBOL_GPL(cpufreq_frequency_get_table);
+#endif
 
 static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 {

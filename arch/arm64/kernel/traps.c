@@ -44,6 +44,8 @@
 #include <asm/exception.h>
 #include <asm/system_misc.h>
 #include <asm/sysreg.h>
+#include <mt-plat/aee.h>
+#include <sched.h>
 
 static const char *handler[]= {
 	"Synchronous Abort",
@@ -52,7 +54,7 @@ static const char *handler[]= {
 	"Error"
 };
 
-int show_unhandled_signals = 0;
+int show_unhandled_signals = 1;
 
 /*
  * Dump out the contents of some kernel memory nicely...
@@ -165,6 +167,9 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		frame.fp = (unsigned long)__builtin_frame_address(0);
 		frame.sp = current_stack_pointer;
 		frame.pc = (unsigned long)dump_backtrace;
+	} else if (tsk == task_rq(tsk)->curr) {
+		pr_notice("Do not dump other cpus' running task\n");
+		return;
 	} else {
 		/*
 		 * task blocked in __switch_to
@@ -638,6 +643,22 @@ const char *esr_get_class_string(u32 esr)
 {
 	return esr_class_str[ESR_ELx_EC(esr)];
 }
+
+
+#ifdef CONFIG_MEDIATEK_SOLUTION
+static void (*async_abort_handler)(struct pt_regs *regs, void *);
+static void *async_abort_priv;
+
+int register_async_abort_handler(void (*fn)(struct pt_regs *regs, void *),
+				 void *priv)
+{
+	async_abort_handler = fn;
+	async_abort_priv = priv;
+
+	return 0;
+}
+#endif
+
 
 /*
  * bad_mode handles the impossible case in the exception vector. This is always
